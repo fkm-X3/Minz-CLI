@@ -55,68 +55,64 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "content": args.prompt
     })];
 
-    // First API Call
-    let response: Value = client
-        .chat()
-        .create_byot(json!({
-            "model": "anthropic/claude-haiku-4.5",
-            "messages": messages,
-            "tools": tools
-        }))
-        .await?;
+    // Agent Loop
+    loop {
+        let response: Value = client
+            .chat()
+            .create_byot(json!({
+                "model": "anthropic/claude-haiku-4.5",
+                "messages": messages,
+                "tools": tools
+            }))
+            .await?;
 
-    let message = &response["choices"][0]["message"];
+        let message = response["choices"][0]["message"].clone();
 
-    // Check if the LLM called any tools
-    if let Some(tool_calls) = message["tool_calls"].as_array() {
-        if !tool_calls.is_empty() {
-            // Append assistant response to message history
-            messages.push(message.clone());
+        // Append assistant response to message history
+        messages.push(message.clone());
 
-            // Process each tool call
-            for tool_call in tool_calls {
-                let fn_name = tool_call["function"]["name"].as_str().unwrap_or("");
-                let call_id = tool_call["id"].as_str().unwrap_or("");
+        // Check if the LLM called any tools
+        if let Some(tool_calls) = message["tool_calls"].as_array() {
+            if !tool_calls.is_empty() {
+                // Process each tool call
+                for tool_call in tool_calls {
+                    let fn_name = tool_call["function"]["name"].as_str().unwrap_or("");
+                    let call_id = tool_call["id"].as_str().unwrap_or("");
 
-                if fn_name == "Read" {
-                    let args_str = tool_call["function"]["arguments"].as_str().unwrap_or("{}");
-                    let args_val: Value = serde_json::from_str(args_str)?;
+                    if fn_name == "Read" {
+                        let args_str = tool_call["function"]["arguments"].as_str().unwrap_or("{}");
+                        let args_val: Value = serde_json::from_str(args_str)?;
 
-                    if let Some(file_path) = args_val["file_path"].as_str() {
-                        // Read file contents from local disk
-                        let file_content = fs::read_to_string(file_path)?;
+                        // Gracefully handle read failures and send errors back to the model
+                        let tool_content = if let Some(file_path) = args_val["file_path"].as_str() {
+                            match fs::read_to_string(file_path) {
+                                Ok(content) => content,
+                                Err(err) => format!("Error reading file: {}", err),
+                            }
+                        } else {
+                            "Missing file_path argument".to_string()
+                        };
 
                         // Append tool result message
                         messages.push(json!({
                             "role": "tool",
                             "tool_call_id": call_id,
-                            "content": file_content
+                            "content": tool_content
                         }));
                     }
                 }
+
+                // Restart the loop to feed tool execution results back to the model
+                continue;
             }
-
-            // Second API Call with tool output included
-            let final_response: Value = client
-                .chat()
-                .create_byot(json!({
-                    "model": "anthropic/claude-haiku-4.5",
-                    "messages": messages,
-                    "tools": tools
-                }))
-                .await?;
-
-            if let Some(content) = final_response["choices"][0]["message"]["content"].as_str() {
-                println!("{}", content);
-            }
-
-            return Ok(());
         }
-    }
 
-    // Fallback if no tool call was returned
-    if let Some(content) = message["content"].as_str() {
-        println!("{}", content);
+        // If no tool calls were returned, output final response and terminate loop
+        if let Some(content) = message["content"].as_str() {
+            println!("{}", content);
+        }
+
+        break;
     }
 
     Ok(())
