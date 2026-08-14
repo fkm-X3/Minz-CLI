@@ -1,7 +1,7 @@
-use async_openai::{Client, config::OpenAIConfig};
+use async_openai::{config::OpenAIConfig, Client};
 use clap::Parser;
-use serde_json::{Value, json};
-use std::{env, process};
+use serde_json::{json, Value};
+use std::{env, fs, process};
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -28,63 +28,94 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let client = Client::with_config(config);
 
-    #[allow(unused_variables)]
+    // Define tools
+    let tools = json!([
+        {
+            "type": "function",
+            "function": {
+                "name": "Read",
+                "description": "Read and return the contents of a file",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "The path to the file to read"
+                        }
+                    },
+                    "required": ["file_path"]
+                }
+            }
+        }
+    ]);
+
+    // Build initial message history
+    let mut messages = vec![json!({
+        "role": "user",
+        "content": args.prompt
+    })];
+
+    // First API Call
     let response: Value = client
         .chat()
         .create_byot(json!({
-            "messages": [
-                {
-                    "role": "user",
-                    "content": args.prompt
-                }
-            ],
             "model": "anthropic/claude-haiku-4.5",
-            "tools": [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "Read",
-                        "description": "Read and return the contents of a file",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "file_path": {
-                                    "type": "string",
-                                    "description": "The path to the file to read"
-                                }
-                            },
-                            "required": ["file_path"]
-                        }
-                    }
-                }
-            ],
-            "choices": [
-                {
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": null,
-                        "tool_calls": [
-                            {
-                                "id": "call_read",
-                                "type": "function",
-                                "function": {
-                                    "name": "Read",
-                                    "arguments": "{\"file_path\": \"/path/to/file.txt\"}"
-                                }
-                            }
-                        ]
-                    },
-                    "finish_reason": "tool_calls"
-                }
-            ]
+            "messages": messages,
+            "tools": tools
         }))
         .await?;
 
-    // You can use print statements as follows for debugging, they'll be visible when running tests.
-    eprintln!("Logs from your program will appear here!");
+    let message = &response["choices"][0]["message"];
 
-    if let Some(content) = response["choices"][0]["message"]["content"].as_str() {
+    // Check if the LLM called any tools
+    if let Some(tool_calls) = message["tool_calls"].as_array() {
+        if !tool_calls.is_empty() {
+            // Append assistant response to message history
+            messages.push(message.clone());
+
+            // Process each tool call
+            for tool_call in tool_calls {
+                let fn_name = tool_call["function"]["name"].as_str().unwrap_or("");
+                let call_id = tool_call["id"].as_str().unwrap_or("");
+
+                if fn_name == "Read" {
+                    let args_str = tool_call["function"]["arguments"].as_str().unwrap_or("{}");
+                    let args_val: Value = serde_json::from_str(args_str)?;
+
+                    if let Some(file_path) = args_val["file_path"].as_str() {
+                        // Read file contents from local disk
+                        let file_content = fs::read_to_string(file_path)?;
+
+                        // Append tool result message
+                        messages.push(json!({
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "content": file_content
+                        }));
+                    }
+                }
+            }
+
+            // Second API Call with tool output included
+            let final_response: Value = client
+                .chat()
+                .create_byot(json!({
+                    "model": "anthropic/claude-haiku-4.5",
+                    "messages": messages,
+                    "tools": tools
+                }))
+                .await?;
+
+            if let Some(content) = final_response["choices"][0]["message"]["content"].as_str() {
+                println!("{}", content);
+            }
+
+            return Ok(());
+        }
+    }
+
+    // Fallback if no tool call was returned
+    if let Some(content) = message["content"].as_str() {
         println!("{}", content);
     }
 
