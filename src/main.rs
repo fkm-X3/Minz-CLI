@@ -45,14 +45,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "function": {
                         "name": "Read",
                         "description": "Read and return the contents of a file",
-                        "perameters": {
+                        "parameters": {
                             "type": "object",
                             "properties": {
                                 "file_path": {
                                     "type": "string",
                                     "description": "The path to the file to read"
                                 }
-                            }
+                            },
                             "required": ["file_path"]
                         }
                     }
