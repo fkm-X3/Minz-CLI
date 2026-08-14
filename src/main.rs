@@ -70,7 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 "type": "function",
                                 "function": {
                                     "name": "Read",
-                                    "arguments": "{\"path\": \"/path/to/file.txt\"}"
+                                    "arguments": "{\"file_path\": \"/path/to/file.txt\"}"
                                 }
                             }
                         ]
