@@ -57,6 +57,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
+            ],
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [
+                            {
+                                "id": "call_read",
+                                "type": "function",
+                                "function": {
+                                    "name": "Read",
+                                    "arguments": "{\"path\": \"/path/to/file.txt\"}"
+                                }
+                            }
+                        ]
+                    },
+                    "finish_reason": "tool_calls"
+                }
             ]
         }))
         .await?;
