@@ -46,6 +46,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "required": ["file_path"]
                 }
             }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "Write",
+                "description": "Write content to a file at the specified path",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "The path to the file to write to"
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "The text content to write to the file"
+                        }
+                    },
+                    "required": ["file_path", "content"]
+                }
+            }
         }
     ]);
 
@@ -79,27 +100,46 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let fn_name = tool_call["function"]["name"].as_str().unwrap_or("");
                     let call_id = tool_call["id"].as_str().unwrap_or("");
 
-                    if fn_name == "Read" {
-                        let args_str = tool_call["function"]["arguments"].as_str().unwrap_or("{}");
-                        let args_val: Value = serde_json::from_str(args_str)?;
+                    let tool_content = match fn_name {
+                        "Read" => {
+                            let args_str = tool_call["function"]["arguments"].as_str().unwrap_or("{}");
+                            let args_val: Value = serde_json::from_str(args_str)?;
 
-                        // Gracefully handle read failures and send errors back to the model
-                        let tool_content = if let Some(file_path) = args_val["file_path"].as_str() {
-                            match fs::read_to_string(file_path) {
-                                Ok(content) => content,
-                                Err(err) => format!("Error reading file: {}", err),
+                            if let Some(file_path) = args_val["file_path"].as_str() {
+                                match fs::read_to_string(file_path) {
+                                    Ok(content) => content,
+                                    Err(err) => format!("Error reading file: {}", err),
+                                }
+                            } else {
+                                "Missing file_path argument".to_string()
                             }
-                        } else {
-                            "Missing file_path argument".to_string()
-                        };
+                        }
+                        "Write" => {
+                            let args_str = tool_call["function"]["arguments"].as_str().unwrap_or("{}");
+                            let args_val: Value = serde_json::from_str(args_str)?;
 
-                        // Append tool result message
-                        messages.push(json!({
-                            "role": "tool",
-                            "tool_call_id": call_id,
-                            "content": tool_content
-                        }));
-                    }
+                            let file_path = args_val["file_path"].as_str();
+                            let content = args_val["content"].as_str();
+
+                            match (file_path, content) {
+                                (Some(path), Some(text)) => {
+                                    match fs::write(path, text) {
+                                        Ok(_) => format!("Successfully wrote to {}", path),
+                                        Err(err) => format!("Error writing to file: {}", err),
+                                    }
+                                }
+                                _ => "Missing required arguments (file_path or content)".to_string(),
+                            }
+                        }
+                        _ => format!("Unknown tool function: {}", fn_name),
+                    };
+
+                    // Append tool result message
+                    messages.push(json!({
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "content": tool_content
+                    }));
                 }
 
                 // Restart the loop to feed tool execution results back to the model
