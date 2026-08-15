@@ -1,5 +1,6 @@
 use serde_json::{json, Value};
 use std::fs;
+use std::process::Command;
 
 /// Returns the JSON schema for all available agent tools.
 pub fn get_tool_definitions() -> Value {
@@ -41,6 +42,23 @@ pub fn get_tool_definitions() -> Value {
                     "required": ["file_path", "content"]
                 }
             }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "Bash",
+                "description": "Execute a shell command using bash and return stdout and stderr",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "The bash command to execute"
+                        }
+                    },
+                    "required": ["command"]
+                }
+            }
         }
     ])
 }
@@ -73,6 +91,20 @@ pub fn execute_tool(fn_name: &str, args_json: &str) -> String {
                     Err(err) => format!("Error writing to file: {}", err),
                 },
                 _ => "Missing required arguments ('file_path' or 'content')".to_string(),
+            }
+        }
+        "Bash" | "bash" => {
+            if let Some(command) = args_val["command"].as_str() {
+                match Command::new("bash").arg("-c").arg(command).output() {
+                    Ok(output) => {
+                        let stdout = String::from_utf8_lossy(&output.stdout);
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        format!("STDOUT:\n{}\nSTDERR:\n{}", stdout, stderr)
+                    }
+                    Err(err) => format!("Failed to execute process: {}", err),
+                }
+            } else {
+                "Missing 'command' argument".to_string()
             }
         }
         _ => format!("Unknown tool function: {}", fn_name),
