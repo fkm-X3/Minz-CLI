@@ -1,0 +1,6 @@
+# Ignore stuff from main branch
+Cargo.toml
+Cargo.lock
+.gitattributes
+src/
+target/
